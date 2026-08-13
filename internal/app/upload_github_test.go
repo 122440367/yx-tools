@@ -2,7 +2,7 @@ package app
 
 import "testing"
 
-func TestFormatGitHubContentMatchesWorkerFormat(t *testing.T) {
+func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 	rs := []Result{
 		{IP: "1.1.1.1", Port: 443, Speed: 8.34},
 		{IP: "202.100.1.1", Port: 8443, Speed: 5},
@@ -12,9 +12,9 @@ func TestFormatGitHubContentMatchesWorkerFormat(t *testing.T) {
 		"1.1.1.1":     {CountryCode: "AU", Org: "Cloudflare, Inc.", AS: "AS13335 Cloudflare, Inc."},
 		"2001:db8::1": {CountryCode: "CN", Org: "Customer Name", AS: "AS9808 China Mobile", ASName: "CHINAMOBILE-CN"},
 	}
-	want := "1.1.1.1 # AU | CF | 8.34MB/s\n" +
-		"202.100.1.1 # XX | 未知 | 5MB/s\n" +
-		"2001:db8::1 # CN | CM | 3.5MB/s"
+	want := "1.1.1.1 # 1 | AU | CF | 8.34MB/s\n" +
+		"202.100.1.1 # 2 | XX | 未知 | 5MB/s\n" +
+		"2001:db8::1 # 3 | CN | CM | 3.5MB/s"
 	if got := formatGitHubContent(rs, infos); got != want {
 		t.Fatalf("want:\n%s\n\ngot:\n%s", want, got)
 	}

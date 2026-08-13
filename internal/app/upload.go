@@ -172,7 +172,8 @@ type ipInfoResponse struct {
 	ASName      string `json:"asname"`
 }
 
-// GitHub 文件沿用 Worker 的 niceip.txt 字段顺序，但不再输出运营商栏。
+// GitHub 文件在 Worker 的 niceip.txt 字段前增加从 1 开始的顺序编号，
+// 但不再输出运营商栏。
 // 国家和网络厂商优先查询，查询失败时仍会正常上传。
 func buildGitHubContent(ctx context.Context, rs []Result) string {
 	infos := batchLookupIPInfo(ctx, rs)
@@ -253,7 +254,7 @@ func normalizeIP(ip string) string {
 
 func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 	var sb strings.Builder
-	for _, r := range rs {
+	for i, r := range rs {
 		ip := strings.TrimSpace(r.IP)
 		info := infos[normalizeIP(ip)]
 		country := strings.ToUpper(strings.TrimSpace(info.CountryCode))
@@ -261,8 +262,8 @@ func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 			country = "XX"
 		}
 		provider := providerName(ip, info)
-		fmt.Fprintf(&sb, "%s # %s | %s | %sMB/s\n",
-			ip, country, provider, formatSpeed(r.Speed))
+		fmt.Fprintf(&sb, "%s # %d | %s | %s | %sMB/s\n",
+			ip, i+1, country, provider, formatSpeed(r.Speed))
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
 }
