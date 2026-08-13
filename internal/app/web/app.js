@@ -216,6 +216,7 @@ async function start() {
     threads: +$('#inThread').value || 200,
     port: +$('#inPort').value || 443,
     test_url: $('#inURL').value.trim(),
+    ip_file: $('#inIPSource').value.trim(),
     ip_text: $('#inIPText').value.trim(),
     sample_size: state.pool,
     // 只有点了「全部」这一档才穷举网段内每个 IP
@@ -440,6 +441,8 @@ function setPool(n, opt) {
   const note = $('#poolNote');
   if ($('#inIPText').value.trim() !== '') {
     note.textContent = '用你填的自定义 IP 段，不走官方段';
+  } else if ($('#inIPSource').value.trim() !== '') {
+    note.textContent = '从远程链接读取 IP 列表，不走官方段';
   } else if (n === 0) {
     note.textContent = '穷举网段内每个 IP，量很大、很慢';
   } else {
@@ -575,6 +578,9 @@ function buildCronArgs() {
   const url = $('#inURL').value.trim();
   if (url && url !== state.system.default_url) push('-url', url);
 
+  const ipSource = $('#inIPSource').value.trim();
+  if (ipSource) push('-f', ipSource);
+
   // 定时跑通常是为了自动上报，带上已填好的目标
   const domain = $('#cfgDomain').value.trim();
   const uuid = $('#cfgUUID').value.trim();
@@ -673,6 +679,7 @@ async function removeCron() {
     setPool(v > 0 ? v : 0, { custom: true });
   });
   $('#inIPText').addEventListener('input', syncPoolNote);
+  $('#inIPSource').addEventListener('input', syncPoolNote);
   $('#btnStart').onclick = start;
   $('#btnStop').onclick = () => api('/api/cancel', { method: 'POST' }).catch(() => {});
   $('#filterText').addEventListener('input', renderTable);

@@ -89,11 +89,22 @@ go build -o yx ./cmd/yx
 # 只测延迟、不下载，最终取延迟最低的 100 个
 ./yx test -n 100 -sl 0 -tl 0 -nodl
 
+# 从远程链接在内存中读取 IP，不限延迟和速度下限，最终按速度排序
+./yx test -f https://example.com/source.txt -n 100 -sl 0 -tl 0
+
 # 只测香港和新加坡
 ./yx test -colo HKG,SIN -n 20
 
 # 测完直接上报到 cfnew
 ./yx test -n 10 -upload api -domain your.workers.dev -uuid 你的UUID -clear
+
+# 测速完成后直接上传到 GitHub
+./yx test -n 30 -sl 0 -tl 0 -upload github -repo owner/repo -token YOUR_GITHUB_TOKEN -path cloudflare_ips.txt
+
+# 从远程链接读取 IP，不限速度和延迟，测速后上传最快的 30 条到 GitHub
+./yx test -f https://example.com/source.txt -n 100 -sl 0 -tl 0 \
+  -upload github -repo owner/repo -token YOUR_GITHUB_TOKEN \
+  -path cloudflare_ips.txt -limit 30
 
 # 从已有结果生成反代列表
 ./yx proxy -limit 20
@@ -107,6 +118,62 @@ go build -o yx ./cmd/yx
 测速的候选数量，`-all` 才会穷举全部候选 IP。网页界面的“速度下限”可填
 `0`；“延迟上限”请填 `9999`，即可达到近似不限延迟的效果。结果表也可以
 点击“速度”或“延迟”表头重新排序。
+
+`-f` 既可以填写本地文件，也可以填写 `http://` 或 `https://` 链接。远程列表
+只读入内存，不会保存为本地文件；每行支持单个 IP、CIDR 或 `IP:端口`，也可
+使用 `#` 添加注释。程序会限制响应大小，并拒绝 HTTP 错误、Cloudflare
+Challenge 和 HTML 验证页面。
+
+### 命令行上传到 GitHub
+
+测速完成后直接上传：
+
+```bash
+./yx test -n 30 -sl 0 -tl 0 \
+  -upload github \
+  -repo owner/repo \
+  -token YOUR_GITHUB_TOKEN \
+  -path cloudflare_ips.txt
+```
+
+把已经生成的 `result.csv` 上传到 GitHub：
+
+```bash
+./yx upload \
+  -i result.csv \
+  -upload github \
+  -repo owner/repo \
+  -token YOUR_GITHUB_TOKEN \
+  -path cloudflare_ips.txt
+```
+
+`-repo` 使用 `owner/repo` 格式，`-path` 是仓库内的目标文件路径。Token 需要
+拥有该仓库 Contents 的读写权限。默认上传全部结果；如果只想上传前 10 条，
+可以添加：
+
+```bash
+-limit 10
+```
+
+GitHub 文件格式与 Worker 的 `niceip.txt` 一致，每行是：
+
+```text
+IP # 国家/地区代码 | 网络厂商 | 速度MB/s | 运营商
+```
+
+上传时会批量查询 IP 的国家/地区、网络组织和 ASN，并据此识别电信、联通、移动；
+查询服务暂时不可用时不会影响上传，未知字段会回退为 `XX`、`未知`，运营商再用
+已知且不重叠的 IP 网段判断。该格式只记录 IP，不记录自定义端口。
+
+首次上传成功后，仓库、Token 和文件路径会保存在本地 `yx-config.json`。以后
+上传默认的 `result.csv` 时可以简写为：
+
+```bash
+./yx upload -upload github
+```
+
+注意：直接通过 `-token` 传入 Token 会被 shell 历史记录。完成首次配置后，
+建议从历史记录中删除包含 Token 的命令，并保护好 `yx-config.json`。
 
 `-h` 看完整参数。
 
@@ -143,7 +210,7 @@ crontab 调 `docker exec`。
 | `-t` | 延迟测速线程数，路由器上别开太高 | 200 |
 | `-port` | 测速端口 | 443 |
 | `-url` | 测速地址 | 内置 |
-| `-f` | 自定义 IP 文件，每行一条，支持 `IP:端口` | 自动下载 |
+| `-f` | 自定义 IP 文件或 HTTP(S) 链接，支持 IP、CIDR、`IP:端口` | 自动下载官方段 |
 | `-nodl` | 只测延迟，跳过下载测速 | 否 |
 | `-dt` | 单个 IP 的下载测速时长上限，秒 | 10 |
 | `-mt` | 整轮测速的时长上限，秒；0 不限，到点拿已测出的结果收工 | 0 |
@@ -157,7 +224,7 @@ crontab 调 `docker exec`。
 | `-domain` `-uuid` | cfnew 的 Worker 域名和 UUID |
 | `-repo` `-token` | GitHub 仓库 `owner/repo` 和 Token |
 | `-path` | 仓库内文件路径，默认 `cloudflare_ips.txt` |
-| `-limit` | 上报数量，默认 10 |
+| `-limit` | 上报数量，`0` 表示全部 |
 | `-clear` | 上报前清空已有 IP，建议带上，否则会越堆越多 |
 
 界面：

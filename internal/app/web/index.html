@@ -108,6 +108,7 @@
       <div class="field">
         <label>自定义 IP 段（每行一条，支持 IP:端口）</label>
         <em class="note">不填就用 Cloudflare 官方 IP 段，填了才会覆盖掉</em>
+        <input type="url" id="inIPSource" placeholder="远程 IP 列表链接（可选）">
         <textarea id="inIPText" rows="4" placeholder="104.16.0.0/12&#10;1.1.1.1:2053"></textarea>
         <label class="filepick">
           <input type="file" id="inIPFile" accept=".txt,.csv,text/plain" hidden>

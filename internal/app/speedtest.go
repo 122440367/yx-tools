@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -36,6 +37,7 @@ const (
 	ResultFile      = "result.csv"
 	ProxyListFile   = "ips_ports.txt"
 	defaultPingTime = 4
+	maxRemoteIPList = 8 * 1024 * 1024
 )
 
 // Options 是一次测速任务的输入参数
@@ -48,7 +50,7 @@ type Options struct {
 	Threads    int     `json:"threads"`     // 延迟测速线程数
 	Port       int     `json:"port"`        // 测速端口
 	TestURL    string  `json:"test_url"`    // 下载测速地址
-	IPFile     string  `json:"ip_file"`     // 自定义 IP 文件；为空则按 IPv6 选项自动下载
+	IPFile     string  `json:"ip_file"`     // 自定义 IP 文件或 HTTP(S) 链接；为空则按 IPv6 选项自动下载
 	IPText     string  `json:"ip_text"`     // 直接指定 IP 段，优先于 IPFile
 	SampleSize int     `json:"sample_size"` // 参与延迟测速的候选 IP 数量，0 表示不限
 	Proxy      bool    `json:"proxy"`       // 反代模式：直接测给定的 IP:端口 列表
@@ -170,8 +172,18 @@ func Run(ctx context.Context, o Options, report func(Progress)) (rs []Result, er
 		}
 	}
 
-	ipFile := o.IPFile
-	if o.IPText == "" && ipFile == "" {
+	ipFile := strings.TrimSpace(o.IPFile)
+	ipText := o.IPText
+	if ipText == "" && isHTTPURL(ipFile) {
+		emit(Progress{Stage: "prepare", Message: "正在读取远程 IP 列表"})
+		var err error
+		ipText, err = fetchRemoteIPList(ctx, ipFile)
+		if err != nil {
+			return nil, err
+		}
+		ipFile = ""
+	}
+	if ipText == "" && ipFile == "" {
 		emit(Progress{Stage: "prepare", Message: "正在获取 Cloudflare IP 段"})
 		var err error
 		ipFile, err = ensureIPFile(ctx, o.IPv6)
@@ -192,7 +204,7 @@ func Run(ctx context.Context, o Options, report func(Progress)) (rs []Result, er
 	task.TestAll = o.TestAll
 	task.SampleSize = o.SampleSize
 	task.IPFile = ipFile
-	task.IPText = o.IPText
+	task.IPText = ipText
 	task.PortMapping = make(map[string]int)
 
 	colo := strings.TrimSpace(o.Colo)
@@ -278,6 +290,63 @@ func Run(ctx context.Context, o Options, report func(Progress)) (rs []Result, er
 	}
 	emit(Progress{Stage: "done", Message: fmt.Sprintf("完成，共 %d 个结果", len(results)), Current: len(results), Total: len(results)})
 	return results, nil
+}
+
+func isHTTPURL(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// fetchRemoteIPList 只把远程列表读入内存，不创建缓存文件。
+func fetchRemoteIPList(ctx context.Context, source string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+	if err != nil {
+		return "", fmt.Errorf("IP 列表链接无效: %w", err)
+	}
+	req.Header.Set("Accept", "text/plain, text/csv, application/octet-stream;q=0.8")
+	req.Header.Set("User-Agent", "yx-tools/remote-ip-list")
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("读取远程 IP 列表失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if strings.EqualFold(resp.Header.Get("cf-mitigated"), "challenge") {
+		return "", fmt.Errorf("远程 IP 列表被 Cloudflare Challenge 拦截")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("读取远程 IP 列表失败: HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > maxRemoteIPList {
+		return "", fmt.Errorf("远程 IP 列表超过 %d MB 上限", maxRemoteIPList/1024/1024)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRemoteIPList+1))
+	if err != nil {
+		return "", fmt.Errorf("读取远程 IP 列表失败: %w", err)
+	}
+	if len(body) > maxRemoteIPList {
+		return "", fmt.Errorf("远程 IP 列表超过 %d MB 上限", maxRemoteIPList/1024/1024)
+	}
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return "", fmt.Errorf("远程 IP 列表为空")
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	preview := strings.ToLower(text)
+	if strings.Contains(contentType, "text/html") ||
+		strings.Contains(preview, "just a moment") ||
+		strings.Contains(preview, "cf-chl-") {
+		return "", fmt.Errorf("远程地址返回了 HTML 或 Cloudflare 验证页面，不是 IP 列表")
+	}
+	return text, nil
 }
 
 func toResults(set utils.DownloadSpeedSet) []Result {

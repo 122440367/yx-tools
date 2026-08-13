@@ -153,19 +153,7 @@ func (r *IPRanges) chooseIPv6() {
 func loadIPRanges() []*net.IPAddr {
 	ranges := newIPRanges()
 	if IPText != "" { // 从参数中获取 IP 段数据
-		IPs := strings.Split(IPText, ",") // 以逗号分隔为数组并循环遍历
-		for _, IP := range IPs {
-			IP = strings.TrimSpace(IP) // 去除首尾的空白字符（空格、制表符、换行符等）
-			if IP == "" {              // 跳过空的（即开头、结尾或连续多个 ,, 的情况）
-				continue
-			}
-			ranges.parseCIDR(IP) // 解析 IP 段，获得 IP、IP 范围、子网掩码
-			if isIPv4(IP) {      // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
-				ranges.chooseIPv4()
-			} else {
-				ranges.chooseIPv6()
-			}
-		}
+		loadIPScanner(ranges, bufio.NewScanner(strings.NewReader(strings.ReplaceAll(IPText, ",", "\n"))))
 	} else { // 从文件中获取 IP 段数据
 		if IPFile == "" {
 			IPFile = defaultInputFile
@@ -175,37 +163,49 @@ func loadIPRanges() []*net.IPAddr {
 			fatalf("打开 IP 文件失败: %v", err)
 		}
 		defer file.Close()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() { // 循环遍历文件每一行
-			line := strings.TrimSpace(scanner.Text()) // 去除首尾的空白字符（空格、制表符、换行符等）
-			if line == "" {                           // 跳过空行
-				continue
-			}
+		loadIPScanner(ranges, bufio.NewScanner(file))
+	}
+	return sampleIPs(ranges.ips)
+}
 
-			// 检查是否是 IP:端口 格式（反代模式）
-			if strings.Contains(line, ":") && !strings.Contains(line, "/") {
-				parts := strings.Split(line, ":")
-				if len(parts) == 2 {
-					ip := strings.TrimSpace(parts[0])
-					portStr := strings.TrimSpace(parts[1])
-					if port, err := strconv.Atoi(portStr); err == nil && port > 0 && port < 65536 {
-						// 存储端口映射
-						PortMapping[ip] = port
-						// 将IP作为单个IP处理
-						line = ip
-					}
-				}
-			}
+func loadIPScanner(ranges *IPRanges, scanner *bufio.Scanner) {
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(strings.SplitN(scanner.Text(), "#", 2)[0])
+		if line == "" {
+			continue
+		}
+		line = parsePort(line)
+		ranges.parseCIDR(line)
+		if isIPv4(line) {
+			ranges.chooseIPv4()
+		} else {
+			ranges.chooseIPv6()
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fatalf("读取 IP 列表失败: %v", err)
+	}
+}
 
-			ranges.parseCIDR(line) // 解析 IP 段，获得 IP、IP 范围、子网掩码
-			if isIPv4(line) {      // 生成要测速的所有 IPv4 / IPv6 地址（单个/随机/全部）
-				ranges.chooseIPv4()
-			} else {
-				ranges.chooseIPv6()
+func parsePort(line string) string {
+	if strings.HasPrefix(line, "[") {
+		if host, portText, err := net.SplitHostPort(line); err == nil {
+			if port, err := strconv.Atoi(portText); err == nil && port > 0 && port < 65536 && net.ParseIP(host) != nil {
+				PortMapping[host] = port
+				return host
 			}
 		}
 	}
-	return sampleIPs(ranges.ips)
+	if strings.Count(line, ":") == 1 && !strings.Contains(line, "/") {
+		if host, portText, err := net.SplitHostPort(line); err == nil {
+			if port, err := strconv.Atoi(portText); err == nil && port > 0 && port < 65536 && net.ParseIP(host) != nil {
+				PortMapping[host] = port
+				return host
+			}
+		}
+	}
+	return line
 }
 
 // sampleIPs 在候选 IP 超过 SampleSize 时随机抽样。

@@ -40,7 +40,7 @@ const usage = `Cloudflare 优选 IP 测速工具 v%s
   -t      延迟测速线程数（默认 200，最大 1000）
   -port   测速端口（默认 443）
   -url    测速地址
-  -f      自定义 IP 文件（支持 IP:端口 每行一条）；留空自动用 Cloudflare 官方 IP 段
+  -f      自定义 IP 文件或 HTTP(S) 链接；支持 IP、CIDR、IP:端口
   -c      参与延迟测速的候选 IP 数量，从官方段里随机抽（默认 0 不限，约 6000 个）
   -all    穷举每个网段的全部 IP（很慢，会忽略 -c）
   -http   用真实 HTTP 请求测延迟（含 TLS 握手与服务端响应），比 TCP 握手准
@@ -207,7 +207,7 @@ func runTest(args []string) {
 	threads := fs.Int("t", 200, "延迟测速线程数")
 	port := fs.Int("port", 443, "测速端口")
 	url := fs.String("url", "", "测速地址")
-	ipFile := fs.String("f", "", "自定义 IP 文件")
+	ipFile := fs.String("f", "", "自定义 IP 文件或 HTTP(S) 链接")
 	sample := fs.Int("c", 0, "候选 IP 数量，0 表示不限")
 	testAll := fs.Bool("all", false, "穷举全部 IP")
 	httping := fs.Bool("http", false, "用真实 HTTP 请求测延迟")
