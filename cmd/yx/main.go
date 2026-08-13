@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/byJoey/yx-tools/internal/app"
+	"github.com/122440367/yx-tools/internal/app"
 )
 
 var version = "3.0.0"

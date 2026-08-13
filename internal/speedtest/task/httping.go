@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/byJoey/yx-tools/internal/speedtest/utils"
+	"github.com/122440367/yx-tools/internal/speedtest/utils"
 )
 
 var (

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byJoey/yx-tools/internal/speedtest/task"
+	"github.com/122440367/yx-tools/internal/speedtest/task"
 )
 
 func newCancelableCtx() (context.Context, context.CancelFunc) {

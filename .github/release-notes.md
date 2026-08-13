@@ -50,7 +50,7 @@ Windows 解压后可直接双击运行；也可以在文件夹中打开 PowerShe
 Docker：
 
 ```bash
-docker run -d --name yx -p 8080:8080 -v $(pwd)/data:/data ghcr.io/byjoey/yx-tools:latest
+docker run -d --name yx -p 8080:8080 -v $(pwd)/data:/data ghcr.io/122440367/yx-tools:latest
 ```
 
 ## 校验文件完整性

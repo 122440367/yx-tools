@@ -4,7 +4,7 @@ Cloudflare 优选 IP 测速工具。单个二进制，命令行和网页界面�
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)](https://github.com/byJoey/yx-tools/releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey.svg)](https://github.com/122440367/yx-tools/releases)
 
 测速内核基于 [XIU2/CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)，
 补了反代场景需要的 `IP:端口` 支持。
@@ -14,12 +14,12 @@ Cloudflare 优选 IP 测速工具。单个二进制，命令行和网页界面�
 - 测 Cloudflare 各数据中心的延迟和下载速度，支持 IPv4 / IPv6
 - 按机场码筛地区，全球 97 个数据中心
 - 反代模式：输入 `IP:端口`，结果保留端口信息
-- 一键上报到 [cfnew](https://github.com/byJoey/cfnew) 面板，或推到 GitHub 仓库
+- 一键上报到 cfnew 面板，或推到 GitHub 仓库
 - 网页界面实时看进度，也能纯命令行跑，适合塞进定时任务
 
 ## 装
 
-去 [Releases](https://github.com/byJoey/yx-tools/releases) 下对应平台的包，解压就能跑。不用装 Python，不用装依赖。
+去 [Releases](https://github.com/122440367/yx-tools/releases) 下载对应平台的包，解压就能跑。不用装 Python，不用装依赖。
 
 不知道下哪个？照这张表挑：
 
@@ -53,7 +53,7 @@ macOS 首次运行若提示「无法验证开发者」，去「系统设置 → 
 自己编译也行：
 
 ```bash
-git clone https://github.com/byJoey/yx-tools.git
+git clone https://github.com/122440367/yx-tools.git
 cd yx-tools
 go build -o yx ./cmd/yx
 ```
@@ -189,7 +189,7 @@ docker compose up -d
 不想用 compose 就直接跑：
 
 ```bash
-docker run -d --name yx-tools -p 8080:8080 -v $PWD/data:/data ghcr.io/byjoey/yx-tools:latest
+docker run -d --name yx-tools -p 8080:8080 -v $PWD/data:/data ghcr.io/122440367/yx-tools:latest
 ```
 
 换存放位置改环境变量 `YX_DATA_DIR` 即可。
@@ -265,11 +265,6 @@ Windows 用「任务计划程序」调用 `yx.exe test ...` 即可。
 - `yx-config.json` — 配置，含 Token，注意别泄露
 - `Cloudflare.txt` / `Cloudflare_ipv6.txt` — 缓存的官方 IP 段
 - `yx-cron.log` — 定时任务的输出（设了定时任务才有）
-
-## 相关
-
-- [cfnew](https://github.com/byJoey/cfnew) — 配套的 Worker 面板
-- [博客](https://joeyblog.net) ｜ [YouTube](https://youtube.com/@joeyblog) ｜ [TG 群](https://t.me/+ft-zI76oovgwNmRh)
 
 ## 致谢
 
