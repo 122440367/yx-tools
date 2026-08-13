@@ -10,52 +10,36 @@ func TestFormatGitHubContentMatchesWorkerFormat(t *testing.T) {
 	}
 	infos := map[string]ipInfo{
 		"1.1.1.1":     {CountryCode: "AU", Org: "Cloudflare, Inc.", AS: "AS13335 Cloudflare, Inc."},
-		"2001:db8::1": {CountryCode: "CN", Org: "China Mobile", AS: "AS9808 China Mobile"},
+		"2001:db8::1": {CountryCode: "CN", Org: "Customer Name", AS: "AS9808 China Mobile", ASName: "CHINAMOBILE-CN"},
 	}
-	want := "1.1.1.1 # AU | CF | 8.34MB/s | 其他\n" +
-		"202.100.1.1 # XX | 未知 | 5MB/s | 电信\n" +
-		"2001:db8::1 # CN | CM | 3.5MB/s | 移动"
+	want := "1.1.1.1 # AU | CF | 8.34MB/s\n" +
+		"202.100.1.1 # XX | 未知 | 5MB/s\n" +
+		"2001:db8::1 # CN | CM | 3.5MB/s"
 	if got := formatGitHubContent(rs, infos); got != want {
 		t.Fatalf("want:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 
-func TestDetectISPUsesNetworkMetadataBeforePrefixFallback(t *testing.T) {
+func TestProviderName(t *testing.T) {
 	cases := []struct {
-		name    string
-		ip      string
-		network string
-		want    string
+		name string
+		ip   string
+		info ipInfo
+		want string
 	}{
-		{"电信组织名", "8.8.8.8", "CHINANET-BACKBONE No.31,Jin-rong Street", ispTelecom},
-		{"联通ASN", "8.8.8.8", "AS4837 CHINA UNICOM China169 Backbone", ispUnicom},
-		{"移动ASN", "2001:db8::1", "AS9808 China Mobile Communications Group", ispMobile},
-		{"电信网段兜底", "202.100.1.1", "", ispTelecom},
-		{"联通网段兜底", "58.20.1.1", "", ispUnicom},
-		{"移动网段兜底", "211.140.1.1", "", ispMobile},
-		{"不照搬重叠大网段", "111.1.1.1", "", ispOther},
-		{"普通Cloudflare地址", "1.1.1.1", "AS13335 Cloudflare", ispOther},
+		{"从org识别", "1.1.1.1", ipInfo{Org: "Cloudflare, Inc."}, "CF"},
+		{"org是客户名时从asname识别", "8.8.8.8", ipInfo{Org: "Customer Name", ASName: "CLOUDFLARENET"}, "CF"},
+		{"从AS描述识别", "8.8.8.8", ipInfo{Org: "Customer Name", AS: "AS16509 Amazon.com, Inc."}, "AWS"},
+		{"Cloudflare IPv4离线兜底", "104.16.1.1", ipInfo{}, "CF"},
+		{"Cloudflare IPv6离线兜底", "2606:4700::1", ipInfo{}, "CF"},
+		{"未知厂商保留真实组织名", "8.8.8.8", ipInfo{Org: "Example Hosting Ltd"}, "Example"},
+		{"完全没有信息", "8.8.8.8", ipInfo{}, "未知"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := detectISP(tc.ip, tc.network); got != tc.want {
+			if got := providerName(tc.ip, tc.info); got != tc.want {
 				t.Fatalf("want %q, got %q", tc.want, got)
 			}
 		})
-	}
-}
-
-func TestProviderAbbreviation(t *testing.T) {
-	cases := map[string]string{
-		"Cloudflare, Inc.": "CF",
-		"China Telecom":    "ChinaNet",
-		"China Unicom":     "CU",
-		"China Mobile":     "CM",
-		"":                 "未知",
-	}
-	for input, want := range cases {
-		if got := providerAbbreviation(input); got != want {
-			t.Fatalf("providerAbbreviation(%q): want %q, got %q", input, want, got)
-		}
 	}
 }

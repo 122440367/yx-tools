@@ -172,8 +172,8 @@ type ipInfoResponse struct {
 	ASName      string `json:"asname"`
 }
 
-// GitHub 文件沿用 Worker 的 niceip.txt 格式。国家和网络组织优先查询，
-// 查询失败时仍会正常上传，只是未知字段回退为 XX / 未知。
+// GitHub 文件沿用 Worker 的 niceip.txt 字段顺序，但不再输出运营商栏。
+// 国家和网络厂商优先查询，查询失败时仍会正常上传。
 func buildGitHubContent(ctx context.Context, rs []Result) string {
 	infos := batchLookupIPInfo(ctx, rs)
 	return formatGitHubContent(rs, infos)
@@ -260,14 +260,9 @@ func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 		if len(country) != 2 {
 			country = "XX"
 		}
-		providerSource := info.Org
-		if strings.TrimSpace(providerSource) == "" {
-			providerSource = info.ASName
-		}
-		provider := providerAbbreviation(providerSource)
-		isp := detectISP(ip, strings.Join([]string{info.Org, info.AS, info.ASName}, " "))
-		fmt.Fprintf(&sb, "%s # %s | %s | %sMB/s | %s\n",
-			ip, country, provider, formatSpeed(r.Speed), isp)
+		provider := providerName(ip, info)
+		fmt.Fprintf(&sb, "%s # %s | %s | %sMB/s\n",
+			ip, country, provider, formatSpeed(r.Speed))
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
 }
@@ -276,47 +271,61 @@ func formatSpeed(speed float64) string {
 	return strconv.FormatFloat(speed, 'f', -1, 64)
 }
 
-func providerAbbreviation(org string) string {
-	org = strings.TrimSpace(org)
-	if org == "" {
-		return "未知"
-	}
-	lower := strings.ToLower(org)
+var cloudflarePrefixes = mustPrefixes(
+	"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+	"141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+	"197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+	"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+	"2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+	"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+)
+
+func providerName(ip string, info ipInfo) string {
+	sources := []string{info.Org, info.ASName, info.AS}
+	joined := strings.ToLower(strings.Join(sources, " "))
 	providers := []struct {
-		needle string
-		name   string
+		needles []string
+		name    string
 	}{
-		{"cloudflare", "CF"},
-		{"dmit", "DMIT"},
-		{"amazon", "AWS"},
-		{"google", "GCP"},
-		{"microsoft", "Azure"},
-		{"hetzner", "Hetzner"},
-		{"digitalocean", "DO"},
-		{"vultr", "Vultr"},
-		{"constant company", "Vultr"},
-		{"linode", "Linode"},
-		{"akamai", "Akamai"},
-		{"fastly", "Fastly"},
-		{"ovh", "OVH"},
-		{"m247", "M247"},
-		{"frantech", "BuyVM"},
-		{"buyvm", "BuyVM"},
-		{"psychz", "Psychz"},
-		{"cogent", "Cogent"},
-		{"gtt", "GTT"},
-		{"ntt", "NTT"},
-		{"telstra", "Telstra"},
-		{"pccw", "PCCW"},
-		{"chinanet", "ChinaNet"},
-		{"china telecom", "ChinaNet"},
-		{"china unicom", "CU"},
-		{"china mobile", "CM"},
+		{[]string{"cloudflare", "cloudflarenet"}, "CF"},
+		{[]string{"dmit"}, "DMIT"},
+		{[]string{"amazon", "amazon-aes", "amazon-02", "aws"}, "AWS"},
+		{[]string{"google", "google-cloud-platform"}, "GCP"},
+		{[]string{"microsoft", "azure", "msn-as-block"}, "Azure"},
+		{[]string{"hetzner"}, "Hetzner"},
+		{[]string{"digitalocean"}, "DO"},
+		{[]string{"vultr", "constant company", "choopa"}, "Vultr"},
+		{[]string{"linode"}, "Linode"},
+		{[]string{"akamai"}, "Akamai"},
+		{[]string{"fastly"}, "Fastly"},
+		{[]string{"ovh"}, "OVH"},
+		{[]string{"m247"}, "M247"},
+		{[]string{"frantech", "buyvm"}, "BuyVM"},
+		{[]string{"psychz"}, "Psychz"},
+		{[]string{"cogent"}, "Cogent"},
+		{[]string{"gtt"}, "GTT"},
+		{[]string{"ntt"}, "NTT"},
+		{[]string{"telstra"}, "Telstra"},
+		{[]string{"pccw"}, "PCCW"},
+		{[]string{"chinanet", "china telecom"}, "ChinaNet"},
+		{[]string{"china unicom", "china169"}, "CU"},
+		{[]string{"china mobile", "cmnet"}, "CM"},
 	}
 	for _, p := range providers {
-		if strings.Contains(lower, p.needle) {
-			return p.name
+		for _, needle := range p.needles {
+			if strings.Contains(joined, needle) {
+				return p.name
+			}
 		}
+	}
+	if isCloudflareIP(ip) {
+		return "CF"
+	}
+
+	// 没命中内置缩写时，保留接口返回的真实组织名，而不是笼统写成“其他”。
+	org := firstNonEmpty(info.Org, info.ASName, trimASN(info.AS))
+	if org == "" {
+		return "未知"
 	}
 	parts := strings.FieldsFunc(org, func(r rune) bool {
 		return unicode.IsSpace(r) || r == ',' || r == '/'
@@ -331,29 +340,6 @@ func providerAbbreviation(org string) string {
 	return word
 }
 
-const (
-	ispTelecom = "电信"
-	ispUnicom  = "联通"
-	ispMobile  = "移动"
-	ispOther   = "其他"
-)
-
-var (
-	telecomASNs = map[int]struct{}{4134: {}, 4809: {}, 4812: {}, 23764: {}}
-	unicomASNs  = map[int]struct{}{4837: {}, 9929: {}, 10099: {}}
-	mobileASNs  = map[int]struct{}{9808: {}, 24400: {}, 56040: {}, 58453: {}, 58807: {}}
-
-	telecomPrefixes = mustPrefixes(
-		"58.32.0.0/11", "59.32.0.0/11", "202.96.0.0/11", "219.128.0.0/11",
-	)
-	unicomPrefixes = mustPrefixes(
-		"58.16.0.0/12", "60.0.0.0/11", "106.32.0.0/11", "175.0.0.0/11", "182.32.0.0/11",
-	)
-	mobilePrefixes = mustPrefixes(
-		"36.32.0.0/11", "39.0.0.0/11", "183.0.0.0/11", "211.136.0.0/13", "218.200.0.0/13",
-	)
-)
-
 func mustPrefixes(values ...string) []netip.Prefix {
 	out := make([]netip.Prefix, 0, len(values))
 	for _, value := range values {
@@ -362,69 +348,35 @@ func mustPrefixes(values ...string) []netip.Prefix {
 	return out
 }
 
-// detectISP 优先使用 ASN/网络组织信息；只有查询不到时才使用不重叠的网段兜底。
-// Worker 原来的 111.x—125.x 判断存在大量交叉，不能直接照搬，否则同一 IP
-// 会因为判断顺序被错误归到电信。
-func detectISP(ip, network string) string {
-	lower := strings.ToLower(network)
-	switch {
-	case containsAny(lower, "china telecom", "chinatelecom", "chinanet", "ctgnet", "cn2"):
-		return ispTelecom
-	case containsAny(lower, "china unicom", "chinaunicom", "china169", "unicom"):
-		return ispUnicom
-	case containsAny(lower, "china mobile", "chinamobile", "cmnet", "cmi international", "tietong", "railcom"):
-		return ispMobile
-	}
-	for _, token := range strings.FieldsFunc(strings.ToUpper(network), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	}) {
-		if !strings.HasPrefix(token, "AS") {
-			continue
-		}
-		asn, err := strconv.Atoi(strings.TrimPrefix(token, "AS"))
-		if err != nil {
-			continue
-		}
-		if _, ok := telecomASNs[asn]; ok {
-			return ispTelecom
-		}
-		if _, ok := unicomASNs[asn]; ok {
-			return ispUnicom
-		}
-		if _, ok := mobileASNs[asn]; ok {
-			return ispMobile
-		}
-	}
-
+func isCloudflareIP(ip string) bool {
 	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
-	if err != nil || !addr.Is4() {
-		return ispOther
+	if err != nil {
+		return false
 	}
-	for _, p := range telecomPrefixes {
-		if p.Contains(addr) {
-			return ispTelecom
-		}
-	}
-	for _, p := range unicomPrefixes {
-		if p.Contains(addr) {
-			return ispUnicom
-		}
-	}
-	for _, p := range mobilePrefixes {
-		if p.Contains(addr) {
-			return ispMobile
-		}
-	}
-	return ispOther
-}
-
-func containsAny(s string, values ...string) bool {
-	for _, value := range values {
-		if strings.Contains(s, value) {
+	addr = addr.Unmap()
+	for _, prefix := range cloudflarePrefixes {
+		if prefix.Contains(addr) {
 			return true
 		}
 	}
 	return false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func trimASN(value string) string {
+	parts := strings.Fields(strings.TrimSpace(value))
+	if len(parts) > 1 && strings.HasPrefix(strings.ToUpper(parts[0]), "AS") {
+		return strings.Join(parts[1:], " ")
+	}
+	return value
 }
 
 // UploadToGitHub 把优选列表写入 GitHub 仓库，已存在则更新
