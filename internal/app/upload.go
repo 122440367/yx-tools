@@ -152,6 +152,61 @@ type GitHubTarget struct {
 	Path  string // 仓库内文件路径
 }
 
+// TelegramTarget describes a Telegram Bot destination.
+type TelegramTarget struct {
+	BotToken string
+	ChatID   string
+}
+
+var telegramAPIBase = "https://api.telegram.org"
+
+// UploadToTelegram sends the selected speed-test results as one Telegram message.
+func UploadToTelegram(ctx context.Context, t TelegramTarget, rs []Result, limit int) (int, error) {
+	token, chatID := strings.TrimSpace(t.BotToken), strings.TrimSpace(t.ChatID)
+	if token == "" || chatID == "" {
+		return 0, fmt.Errorf("请先填写 Telegram Bot Token 和 Chat ID")
+	}
+	if limit > 0 && limit < len(rs) { rs = rs[:limit] }
+	if len(rs) == 0 { return 0, fmt.Errorf("没有可发送的结果") }
+	for _, message := range telegramMessages(rs) {
+		payload, err := json.Marshal(map[string]string{"chat_id": chatID, "text": message})
+		if err != nil { return 0, err }
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBase, token), bytes.NewReader(payload))
+		if err != nil { return 0, err }
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := httpClient.Do(req)
+		if err != nil { return 0, err }
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 { return 0, fmt.Errorf("Telegram 发送失败 HTTP %d: %s", resp.StatusCode, truncate(string(body), 200)) }
+		var out struct { OK bool `json:"ok"`; Description string `json:"description"` }
+		if err := json.Unmarshal(body, &out); err != nil || !out.OK {
+			if out.Description == "" { out.Description = truncate(string(body), 200) }
+			return 0, fmt.Errorf("Telegram 发送失败: %s", out.Description)
+		}
+	}
+	return len(rs), nil
+}
+
+func telegramMessages(rs []Result) []string {
+	header := fmt.Sprintf("yx-tools 测速结果（%d 个）\n\n", len(rs))
+	messages := make([]string, 0, 1)
+	var sb strings.Builder
+	sb.WriteString(header)
+	for i, r := range rs {
+		line := fmt.Sprintf("%d. %s:%d  %.2f ms  %.2f MB/s  丢包 %.0f%%", i+1, r.IP, r.Port, r.Delay, r.Speed, r.LossRate*100)
+		if r.ColoName != "" { line += "  " + r.ColoName }
+		line += "\n"
+		if sb.Len()+len(line) > 4096 && sb.Len() > 0 {
+			messages = append(messages, strings.TrimSpace(sb.String()))
+			sb.Reset()
+		}
+		sb.WriteString(line)
+	}
+	if sb.Len() > 0 { messages = append(messages, strings.TrimSpace(sb.String())) }
+	return messages
+}
+
 const ipInfoBatchURL = "http://ip-api.com/batch?fields=status,query,countryCode,org,as,asname"
 
 var ipInfoClient = &http.Client{Timeout: 10 * time.Second}

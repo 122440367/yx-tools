@@ -14,6 +14,8 @@ type Config struct {
 	GitHubToken  string `json:"github_token"`
 	GitHubRepo   string `json:"github_repo"`
 	GitHubPath   string `json:"github_path"`
+	TelegramBotToken string `json:"telegram_bot_token"`
+	TelegramChatID   string `json:"telegram_chat_id"`
 
 	// 上次使用的测速参数，供界面回填
 	Colo       string  `json:"colo"`

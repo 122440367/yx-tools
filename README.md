@@ -101,6 +101,9 @@ go build -o yx ./cmd/yx
 # 测速完成后直接上传到 GitHub
 ./yx test -n 30 -sl 0 -tl 0 -upload github -repo owner/repo -token YOUR_GITHUB_TOKEN -path cloudflare_ips.txt
 
+# 测速完成后把结果发送到 Telegram
+./yx test -n 30 -sl 0 -tl 0 -upload telegram -bot-token YOUR_BOT_TOKEN -chat-id YOUR_CHAT_ID
+
 # 从远程链接读取 IP，不限速度和延迟，测速后上传最快的 30 条到 GitHub
 ./yx test -f https://example.com/source.txt -n 100 -sl 0 -tl 0 \
   -upload github -repo owner/repo -token YOUR_GITHUB_TOKEN \
@@ -179,6 +182,45 @@ IP # 序号 | 国家/地区代码 | 网络厂商 | 速度MB/s
 
 `-h` 看完整参数。
 
+### 发送结果到 Telegram
+
+先在 Telegram 中通过 [@BotFather](https://t.me/BotFather) 创建机器人并取得 Bot Token，然后给机器人发送一条消息。访问下面的地址，把 `YOUR_BOT_TOKEN` 换成真实 Token：
+
+```text
+https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates
+```
+
+响应中的 `message.chat.id` 就是 Chat ID。群组或频道的 Chat ID 通常是负数；向群组发送前需要先把机器人加入群组，向频道发送前需要把机器人设为管理员。
+
+测速结束后直接发送最快的 30 条结果：
+
+```bash
+./yx test -n 100 -sl 0 -tl 0 \
+  -upload telegram \
+  -bot-token YOUR_BOT_TOKEN \
+  -chat-id YOUR_CHAT_ID \
+  -limit 30
+```
+
+把已有的 `result.csv` 发送到 Telegram：
+
+```bash
+./yx upload \
+  -i result.csv \
+  -upload telegram \
+  -bot-token YOUR_BOT_TOKEN \
+  -chat-id YOUR_CHAT_ID \
+  -limit 30
+```
+
+消息包含 IP、端口、平均延迟、下载速度、丢包率和地区。结果过多时会自动拆分为多条 Telegram 消息。首次发送成功后，Bot Token 和 Chat ID 会保存到本地 `yx-config.json`，以后可以简写为：
+
+```bash
+./yx upload -upload telegram -limit 30
+```
+
+Token 会出现在 shell 历史和 `yx-config.json` 中，请妥善保护；如 Token 泄露，应立即通过 BotFather 撤销并重新生成。
+
 ### Docker
 
 ```bash
@@ -222,10 +264,11 @@ crontab 调 `docker exec`。
 
 | 参数 | 说明 |
 | :--- | :--- |
-| `-upload` | `api` 上报 cfnew，`github` 推到仓库 |
+| `-upload` | `api` 上报 cfnew，`github` 推到仓库，`telegram` 发送到 Telegram |
 | `-domain` `-uuid` | cfnew 的 Worker 域名和 UUID |
 | `-repo` `-token` | GitHub 仓库 `owner/repo` 和 Token |
 | `-path` | 仓库内文件路径，默认 `cloudflare_ips.txt` |
+| `-bot-token` `-chat-id` | Telegram Bot Token 和接收消息的 Chat ID |
 | `-limit` | 上报数量，`0` 表示全部 |
 | `-clear` | 上报前清空已有 IP，建议带上，否则会越堆越多 |
 
