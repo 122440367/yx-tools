@@ -29,6 +29,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Release notes are generated from the commits since the previous tag.
+          fetch-depth: 0
 
       - name: Validate tag
         shell: bash
@@ -38,6 +41,42 @@ jobs:
             echo "Expected a tag such as v3.0.7" >&2
             exit 1
           fi
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_tag="$(git describe --tags --abbrev=0 "$RELEASE_TAG^" 2>/dev/null || true)"
+          notes_path=".github/release-notes.generated.md"
+
+          {
+            echo "## 改动说明"
+            echo
+            if [[ -n "$previous_tag" ]]; then
+              echo "以下内容来自 `$previous_tag` 到 `$RELEASE_TAG` 之间的实际提交："
+              echo
+              git log --no-merges --pretty=format:'- `%h` %s' "$previous_tag..$RELEASE_TAG"
+              echo
+              echo
+              echo "### 文件变更统计"
+              echo
+              echo '```text'
+              git diff --stat "$previous_tag" "$RELEASE_TAG"
+              echo '```'
+            else
+              echo "这是仓库的首个版本，以下为该版本提交记录："
+              echo
+              git log --no-merges --pretty=format:'- `%h` %s' "$RELEASE_TAG"
+            fi
+            echo
+            echo
+            echo "## 下载"
+            echo
+            echo "请根据系统和架构选择对应的压缩包；`checksums.txt` 可用于校验文件完整性。"
+          } > "$notes_path"
+
+          echo "Generated release notes:"
+          cat "$notes_path"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -116,7 +155,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: yx-tools ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          body_path: .github/release-notes.md
+          body_path: .github/release-notes.generated.md
           files: |
             dist/*.tar.gz
             dist/*.zip
