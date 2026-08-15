@@ -166,23 +166,6 @@ IP#序号 | 国家/地区代码 | 网络厂商 | 速度MB/s
 
 例如：`1.1.1.1#1 | AU | CF | 8.34MB/s`。
 
-### 上传到优质 IP Worker
-
-Worker 部署了 `/upload-fast-ips` 接口并配置 `SPD_API_TOKEN` 后，可以绕过 GitHub，
-把已有测速结果直接写入 Worker。上传内容与上面的 GitHub 文件格式完全一致：
-
-```bash
-./yx upload \
-  -i /root/result.csv \
-  -upload worker \
-  -worker-url https://spd.472988.xyz \
-  -worker-token YOUR_SPD_API_TOKEN \
-  -limit 30
-```
-
-成功后可通过 `https://spd.472988.xyz/fast-ips.txt` 读取文本列表。Worker 地址和
-Token 会保存在权限为 `0600` 的本地 `yx-config.json`，后续可省略这两个参数。
-
 上传时会批量查询 IP 的国家/地区、网络组织和 ASN，并综合 `org`、`asname`、
 `AS` 三项识别网络厂商。Cloudflare 官方 IPv4/IPv6 网段还带有本地 `CF` 兜底，
 查询服务暂时不可用时也不会误写成“其他”。该格式只记录 IP，不记录自定义端口。
@@ -198,6 +181,51 @@ Token 会保存在权限为 `0600` 的本地 `yx-config.json`，后续可省略�
 建议从历史记录中删除包含 Token 的命令，并保护好 `yx-config.json`。
 
 `-h` 看完整参数。
+
+### 上传到优质 IP Worker
+
+如果 Worker 已部署 `/upload-fast-ips` 接口，并将同一份随机密钥配置为
+`SPD_API_TOKEN` Secret，yx-tools 可以绕过 GitHub API，直接把优选结果写入
+Worker KV。请求使用 `Authorization: Bearer <SPD_API_TOKEN>` 鉴权，上传内容与
+上面的 GitHub 文件格式完全一致。
+
+把 Ubuntu 上已有的 `/root/result.csv` 前 30 条上传到 Worker：
+
+```bash
+./yx upload \
+  -i /root/result.csv \
+  -upload worker \
+  -worker-url https://spd.472988.xyz \
+  -worker-token YOUR_SPD_API_TOKEN \
+  -limit 30
+```
+
+也可以在测速完成后立即上传：
+
+```bash
+./yx test -n 30 -sl 0 -tl 0 \
+  -upload worker \
+  -worker-url https://spd.472988.xyz \
+  -worker-token YOUR_SPD_API_TOKEN \
+  -limit 30
+```
+
+上传成功后会显示 `已上传 30 个 IP 到优质 IP Worker`，结果可从以下地址读取：
+
+```text
+https://spd.472988.xyz/fast-ips.txt
+https://spd.472988.xyz/niceip.txt
+```
+
+这两个地址是同一份 KV 数据的两个入口；`niceip.txt` 是为了兼容 GitHub 文件名
+提供的别名。首次上传成功后，Worker 地址和 Token 会保存在权限为 `0600` 的
+本地 `yx-config.json`，以后上传默认的 `result.csv` 可以简写为：
+
+```bash
+./yx upload -upload worker -limit 30
+```
+
+请不要把真实的 `SPD_API_TOKEN` 提交到仓库或粘贴到公开日志中。
 
 ### 发送结果到 Telegram
 
