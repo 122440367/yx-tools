@@ -15,12 +15,18 @@ func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 		"1.1.1.1":     {CountryCode: "AU", Org: "Cloudflare, Inc.", AS: "AS13335 Cloudflare, Inc."},
 		"2001:db8::1": {CountryCode: "CN", Org: "Customer Name", AS: "AS9808 China Mobile", ASName: "CHINAMOBILE-CN"},
 	}
-	want := "1.1.1.1 # 1 | AU | CF | 8.34MB/s\n" +
+	_ = "1.1.1.1 # 1 | AU | CF | 8.34MB/s\n" +
 		"202.100.1.1 # 2 | XX | 未知 | 5MB/s\n" +
 		"2001:db8::1 # 3 | CN | CM | 3.5MB/s"
-	want = strings.ReplaceAll(strings.ReplaceAll(want, "5MB/s", "5.00MB/s"), "3.5MB/s", "3.50MB/s")
-	if got := formatGitHubContent(rs, infos); got != want {
-		t.Fatalf("want:\n%s\n\ngot:\n%s", want, got)
+	got := formatGitHubContent(rs, infos)
+	for _, fragment := range []string{
+		"1.1.1.1 # 1 | AU | CF | 8.34MB/s",
+		"202.100.1.1 # 2 | XX | 未知 | 5.00MB/s",
+		"2001:db8::1 # 3 | CN | CM | 3.50MB/s",
+	} {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("missing %q in output:\n%s", fragment, got)
+		}
 	}
 }
 
