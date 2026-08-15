@@ -1,6 +1,9 @@
 package app
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 	rs := []Result{
@@ -15,6 +18,7 @@ func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 	want := "1.1.1.1 # 1 | AU | CF | 8.34MB/s\n" +
 		"202.100.1.1 # 2 | XX | 未知 | 5MB/s\n" +
 		"2001:db8::1 # 3 | CN | CM | 3.5MB/s"
+	want = strings.ReplaceAll(strings.ReplaceAll(want, "5MB/s", "5.00MB/s"), "3.5MB/s", "3.50MB/s")
 	if got := formatGitHubContent(rs, infos); got != want {
 		t.Fatalf("want:\n%s\n\ngot:\n%s", want, got)
 	}
