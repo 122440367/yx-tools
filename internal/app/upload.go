@@ -152,6 +152,70 @@ type GitHubTarget struct {
 	Path  string // 仓库内文件路径
 }
 
+// WorkerTarget describes a Worker endpoint that accepts the same text content
+// generated for GitHub. Token must match the Worker's SPD_API_TOKEN secret.
+type WorkerTarget struct {
+	URL   string
+	Token string
+}
+
+func (t WorkerTarget) url() (string, error) {
+	u := strings.TrimSpace(t.URL)
+	if u == "" {
+		return "", fmt.Errorf("请先填写 Worker 地址")
+	}
+	if !strings.HasPrefix(strings.ToLower(u), "http://") && !strings.HasPrefix(strings.ToLower(u), "https://") {
+		u = "https://" + u
+	}
+	u = strings.TrimRight(u, "/")
+	if !strings.HasSuffix(u, "/upload-fast-ips") {
+		u += "/upload-fast-ips"
+	}
+	return u, nil
+}
+
+// UploadToWorker sends results in exactly the same format as UploadToGitHub.
+func UploadToWorker(ctx context.Context, t WorkerTarget, rs []Result, limit int) (int, error) {
+	endpoint, err := t.url()
+	if err != nil {
+		return 0, err
+	}
+	token := strings.TrimSpace(t.Token)
+	if token == "" {
+		return 0, fmt.Errorf("请先填写 Worker API Token")
+	}
+	if limit > 0 && limit < len(rs) {
+		rs = rs[:limit]
+	}
+	if len(rs) == 0 {
+		return 0, fmt.Errorf("没有可上传的结果")
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"content": buildGitHubContent(ctx, rs),
+		"count":   len(rs),
+	})
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("Worker 上传失败 HTTP %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+	return len(rs), nil
+}
+
 // TelegramTarget describes a Telegram Bot destination.
 type TelegramTarget struct {
 	BotToken string

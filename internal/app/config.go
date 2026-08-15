@@ -9,13 +9,15 @@ import (
 
 // Config 是持久化到磁盘的用户配置
 type Config struct {
-	WorkerDomain string `json:"worker_domain"`
-	UUID         string `json:"uuid"`
-	GitHubToken  string `json:"github_token"`
-	GitHubRepo   string `json:"github_repo"`
-	GitHubPath   string `json:"github_path"`
-	TelegramBotToken string `json:"telegram_bot_token"`
-	TelegramChatID   string `json:"telegram_chat_id"`
+	WorkerDomain      string `json:"worker_domain"`
+	UUID              string `json:"uuid"`
+	GitHubToken       string `json:"github_token"`
+	GitHubRepo        string `json:"github_repo"`
+	GitHubPath        string `json:"github_path"`
+	FastIPWorkerURL   string `json:"fast_ip_worker_url"`
+	FastIPWorkerToken string `json:"fast_ip_worker_token"`
+	TelegramBotToken  string `json:"telegram_bot_token"`
+	TelegramChatID    string `json:"telegram_chat_id"`
 
 	// 上次使用的测速参数，供界面回填
 	Colo       string  `json:"colo"`

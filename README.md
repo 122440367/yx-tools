@@ -166,6 +166,23 @@ IP#序号 | 国家/地区代码 | 网络厂商 | 速度MB/s
 
 例如：`1.1.1.1#1 | AU | CF | 8.34MB/s`。
 
+### 上传到优质 IP Worker
+
+Worker 部署了 `/upload-fast-ips` 接口并配置 `SPD_API_TOKEN` 后，可以绕过 GitHub，
+把已有测速结果直接写入 Worker。上传内容与上面的 GitHub 文件格式完全一致：
+
+```bash
+./yx upload \
+  -i /root/result.csv \
+  -upload worker \
+  -worker-url https://spd.472988.xyz \
+  -worker-token YOUR_SPD_API_TOKEN \
+  -limit 30
+```
+
+成功后可通过 `https://spd.472988.xyz/fast-ips.txt` 读取文本列表。Worker 地址和
+Token 会保存在权限为 `0600` 的本地 `yx-config.json`，后续可省略这两个参数。
+
 上传时会批量查询 IP 的国家/地区、网络组织和 ASN，并综合 `org`、`asname`、
 `AS` 三项识别网络厂商。Cloudflare 官方 IPv4/IPv6 网段还带有本地 `CF` 兜底，
 查询服务暂时不可用时也不会误写成“其他”。该格式只记录 IP，不记录自定义端口。

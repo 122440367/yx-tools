@@ -50,8 +50,9 @@ const usage = `Cloudflare 优选 IP 测速工具 v%s
   -o      结果输出文件（默认 result.csv）
 
 上报选项 (test 末尾追加，或单独用 upload):
-  -upload api|github|telegram   上报方式
+  -upload api|worker|github|telegram   上报方式
   -domain / -uuid      Worker 域名与 UUID
+  -worker-url / -worker-token  优质 IP Worker 地址与 SPD_API_TOKEN
   -repo / -token       GitHub 仓库与 Token
   -path                GitHub 文件路径（默认 cloudflare_ips.txt）
   -bot-token / -chat-id Telegram Bot Token 与 Chat ID
@@ -175,30 +176,34 @@ func openBrowser(url string) {
 
 // ── 命令行测速 ────────────────────────────────────
 type uploadFlags struct {
-	mode   *string
-	domain *string
-	uuid   *string
-	repo   *string
-	token  *string
-	path   *string
-	botToken *string
-	chatID *string
-	limit  *int
-	clear  *bool
+	mode        *string
+	domain      *string
+	uuid        *string
+	repo        *string
+	token       *string
+	path        *string
+	workerURL   *string
+	workerToken *string
+	botToken    *string
+	chatID      *string
+	limit       *int
+	clear       *bool
 }
 
 func bindUploadFlags(fs *flag.FlagSet) uploadFlags {
 	return uploadFlags{
-		mode:   fs.String("upload", "", "上报方式: api / github / telegram"),
-		domain: fs.String("domain", "", "Worker 域名"),
-		uuid:   fs.String("uuid", "", "UUID 或自定义路径"),
-		repo:   fs.String("repo", "", "GitHub 仓库 owner/repo"),
-		token:  fs.String("token", "", "GitHub Token"),
-		path:   fs.String("path", "", "GitHub 文件路径"),
-		botToken: fs.String("bot-token", "", "Telegram Bot Token"),
-		chatID: fs.String("chat-id", "", "Telegram Chat ID"),
-		limit:  fs.Int("limit", 0, "上报数量，0 表示全部"),
-		clear:  fs.Bool("clear", false, "上报前清空 Worker 已有 IP"),
+		mode:        fs.String("upload", "", "上报方式: api / worker / github / telegram"),
+		domain:      fs.String("domain", "", "Worker 域名"),
+		uuid:        fs.String("uuid", "", "UUID 或自定义路径"),
+		repo:        fs.String("repo", "", "GitHub 仓库 owner/repo"),
+		token:       fs.String("token", "", "GitHub Token"),
+		path:        fs.String("path", "", "GitHub 文件路径"),
+		workerURL:   fs.String("worker-url", "", "优质 IP Worker 地址"),
+		workerToken: fs.String("worker-token", "", "Worker SPD_API_TOKEN"),
+		botToken:    fs.String("bot-token", "", "Telegram Bot Token"),
+		chatID:      fs.String("chat-id", "", "Telegram Chat ID"),
+		limit:       fs.Int("limit", 0, "上报数量，0 表示全部"),
+		clear:       fs.Bool("clear", false, "上报前清空 Worker 已有 IP"),
 	}
 }
 
@@ -297,6 +302,22 @@ func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
 		cfg.WorkerDomain, cfg.UUID = d, u
 		_ = app.SaveConfig(cfg)
 		fmt.Printf("已上报 %d 个 IP 到 Worker\n", n)
+	case "worker":
+		workerURL, workerToken := *uf.workerURL, *uf.workerToken
+		if workerURL == "" {
+			workerURL = cfg.FastIPWorkerURL
+		}
+		if workerToken == "" {
+			workerToken = cfg.FastIPWorkerToken
+		}
+		n, err := app.UploadToWorker(ctx, app.WorkerTarget{URL: workerURL, Token: workerToken}, rs, *uf.limit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.FastIPWorkerURL, cfg.FastIPWorkerToken = workerURL, workerToken
+		_ = app.SaveConfig(cfg)
+		fmt.Printf("已上传 %d 个 IP 到优质 IP Worker\n", n)
 	case "github":
 		repo, token, path := *uf.repo, *uf.token, *uf.path
 		if repo == "" {
@@ -400,7 +421,7 @@ func runUpload(args []string) {
 	_ = fs.Parse(args)
 
 	if strings.TrimSpace(*uf.mode) == "" {
-		fmt.Fprintln(os.Stderr, "请用 -upload api、-upload github 或 -upload telegram 指定上报方式")
+		fmt.Fprintln(os.Stderr, "请用 -upload api、worker、github 或 telegram 指定上报方式")
 		os.Exit(1)
 	}
 	rs, err := app.ReadCSV(*in)
