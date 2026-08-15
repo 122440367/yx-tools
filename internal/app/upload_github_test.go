@@ -20,6 +20,12 @@ func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 	}
 }
 
+func TestFormatSpeedUsesTwoDecimalPlaces(t *testing.T) {
+	if got, want := formatSpeed(0.5390930239833219), "0.54"; got != want {
+		t.Fatalf("want %q, got %q", want, got)
+	}
+}
+
 func TestProviderName(t *testing.T) {
 	cases := []struct {
 		name string

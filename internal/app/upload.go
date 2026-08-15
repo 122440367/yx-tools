@@ -324,7 +324,9 @@ func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 }
 
 func formatSpeed(speed float64) string {
-	return strconv.FormatFloat(speed, 'f', -1, 64)
+	// GitHub 列表面向人阅读，统一保留两位小数，避免把测速计算中的
+	// float64 二进制精度（例如 0.5390930239833219）直接暴露出来。
+	return strconv.FormatFloat(speed, 'f', 2, 64)
 }
 
 var cloudflarePrefixes = mustPrefixes(
