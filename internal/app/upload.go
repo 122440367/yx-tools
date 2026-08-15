@@ -317,7 +317,7 @@ func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 			country = "XX"
 		}
 		provider := providerName(ip, info)
-		fmt.Fprintf(&sb, "%s # %d | %s | %s | %sMB/s\n",
+		fmt.Fprintf(&sb, "%s#%d | %s | %s | %sMB/s\n",
 			ip, i+1, country, provider, formatSpeed(r.Speed))
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
