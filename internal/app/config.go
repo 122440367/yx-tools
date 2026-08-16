@@ -18,6 +18,9 @@ type Config struct {
 	FastIPWorkerToken string `json:"fast_ip_worker_token"`
 	TelegramBotToken  string `json:"telegram_bot_token"`
 	TelegramChatID    string `json:"telegram_chat_id"`
+	FeishuAppID       string `json:"feishu_app_id"`
+	FeishuReceiveID   string `json:"feishu_receive_id"`
+	FeishuReceiveType string `json:"feishu_receive_id_type"`
 
 	// 上次使用的测速参数，供界面回填
 	Colo       string  `json:"colo"`
@@ -45,15 +48,16 @@ var (
 // DefaultConfig 返回一份带默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
-		GitHubPath: "cloudflare_ips.txt",
-		Count:      10,
-		SpeedLimit: 1,
-		DelayLimit: 1000,
-		Threads:    200,
-		TestURL:    DefaultTestURL,
-		Port:       443,
-		SampleSize: 1000,
-		DLTimeout:  10,
+		GitHubPath:        "cloudflare_ips.txt",
+		Count:             10,
+		SpeedLimit:        1,
+		DelayLimit:        1000,
+		Threads:           200,
+		TestURL:           DefaultTestURL,
+		Port:              443,
+		SampleSize:        1000,
+		DLTimeout:         10,
+		FeishuReceiveType: "chat_id",
 	}
 }
 
@@ -110,6 +114,9 @@ func loadConfigFrom(path string) *Config {
 	}
 	if c.DLTimeout <= 0 {
 		c.DLTimeout = 10
+	}
+	if strings.TrimSpace(c.FeishuReceiveType) == "" {
+		c.FeishuReceiveType = "chat_id"
 	}
 	return c
 }

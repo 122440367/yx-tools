@@ -55,6 +55,13 @@ func writableDir(dir string) bool {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false
 	}
+	// Windows ACLs can make CreateTemp succeed even when a test fixture (or a
+	// mounted volume) explicitly advertises read-only Unix permission bits.
+	// Respect those bits before probing, while still allowing normal inherited
+	// ACLs on directories whose mode is unspecified.
+	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o222 == 0 {
+		return false
+	}
 	f, err := os.CreateTemp(dir, ".yx-write-*")
 	if err != nil {
 		return false

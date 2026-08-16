@@ -363,3 +363,25 @@ Windows 用「任务计划程序」调用 `yx.exe test ...` 即可。
 ## 许可
 
 MIT
+## 飞书任务通知与命令生成器
+
+`yx test` 和独立的 `yx upload` 支持显式的飞书任务通知。通知只发送纯文本汇总：操作与成功/失败状态、本机时区开始/结束时间、人类可读耗时、测速结果数量、上传目标/状态/数量以及脱敏后的失败原因；不会发送 IP、端口、速度等明细。测速得到 0 条有效结果、上传部分失败、取消或通知失败都会按约定返回非零，并在摘要中区分各阶段状态。
+
+示例（每次启用都必须提供 App Secret）：
+
+```sh
+./yx_linux_amd64 test -n 20 -upload github -repo owner/repo -token "$GITHUB_TOKEN" -notify feishu -feishu-app-id cli_xxx -feishu-app-secret secret -feishu-receive-id oc_xxx -feishu-receive-id-type chat_id
+./yx_linux_amd64 upload -i result.csv -upload worker -worker-url https://example -notify feishu -feishu-app-id cli_xxx -feishu-app-secret secret -feishu-receive-id oc_xxx
+```
+
+支持的接收类型为 `chat_id`、`open_id`、`union_id`、`user_id`、`email`，一次命令只通知一个目标。飞书应用需申请发送机器人消息的权限（通常为 `im:message:send_as_bot`，以飞书开放平台当前权限名称为准）。普通通知总预算 10 秒，初次请求后最多重试两次，遵守 `Retry-After`，否则使用约 500ms/1s 退避并复用幂等标识；无法确认未送达的模糊超时不重试。Ctrl+C 会用独立 5 秒上下文尝试发送“已取消”摘要。
+
+App ID、接收 ID 和类型仅在通知成功后保存到 `yx-config.json`（文件权限 0600）；App Secret 永不写入配置，也不会由保存的目标自动启用通知。直接把 Secret 放在命令行仍可能进入 Shell 历史和进程列表，请按需清理。
+
+GitHub Pages 可直接将主分支 `/docs` 设为发布源，打开其中的静态命令生成器。页面无后端、CDN、分析、URL 或浏览器存储，刷新即恢复默认。它按平台/架构生成 `./yx_linux_arm64`、`./yx_darwin_amd64`、`.\\yx_windows_amd64.exe` 等真实文件名，也支持手动覆盖；只输出精简的单行 POSIX/PowerShell 命令。预览默认遮罩 Token/Secret，复制按钮复制真实命令，Clipboard 不可用时可显式显示后手动复制。
+
+运行网页生成器测试：
+
+```sh
+node --test docs/generator.test.mjs
+```

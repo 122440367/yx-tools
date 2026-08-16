@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -58,6 +59,13 @@ const usage = `Cloudflare 优选 IP 测速工具 v%s
   -bot-token / -chat-id Telegram Bot Token 与 Chat ID
   -limit               上报数量（默认 0，即全部）
   -clear               上报前清空 Worker 已有 IP
+
+任务通知选项 (仅 test/upload，需显式启用):
+  -notify feishu       发送飞书任务汇总（不发送 IP 明细）
+  -feishu-app-id       飞书 App ID（成功通知后可保存）
+  -feishu-app-secret   每次必填，永不保存；直接参数可能进入 Shell 历史/进程列表
+  -feishu-receive-id   单个接收目标 ID（多人请使用群聊）
+  -feishu-receive-id-type chat_id/open_id/union_id/user_id/email（默认 chat_id）
 
 界面选项 (web):
   -listen  监听地址（默认 127.0.0.1:8080，远程访问用 0.0.0.0:8080）
@@ -190,6 +198,27 @@ type uploadFlags struct {
 	clear       *bool
 }
 
+type notificationFlags struct {
+	mode          *string
+	appID         *string
+	appSecret     *string
+	receiveID     *string
+	receiveIDType *string
+}
+
+type uploadOutcome struct {
+	Mode   string
+	Status string
+	Count  int
+}
+
+var (
+	runSpeedTest = app.Run
+	readCSV      = app.ReadCSV
+	writeCSV     = app.WriteCSV
+	notifyFeishu = app.NotifyFeishu
+)
+
 func bindUploadFlags(fs *flag.FlagSet) uploadFlags {
 	return uploadFlags{
 		mode:        fs.String("upload", "", "上报方式: api / worker / github / telegram"),
@@ -207,8 +236,60 @@ func bindUploadFlags(fs *flag.FlagSet) uploadFlags {
 	}
 }
 
+func bindNotificationFlags(fs *flag.FlagSet) notificationFlags {
+	return notificationFlags{
+		mode:          fs.String("notify", "", "任务通知方式: feishu"),
+		appID:         fs.String("feishu-app-id", "", "飞书应用 App ID（可在通知成功后保存）"),
+		appSecret:     fs.String("feishu-app-secret", "", "飞书应用 App Secret（必填且永不保存）"),
+		receiveID:     fs.String("feishu-receive-id", "", "飞书单个接收目标 ID"),
+		receiveIDType: fs.String("feishu-receive-id-type", "", "接收目标类型: chat_id/open_id/union_id/user_id/email"),
+	}
+}
+
+func resolveNotification(nf notificationFlags, cfg *app.Config) (bool, app.FeishuTarget, error) {
+	mode := strings.ToLower(strings.TrimSpace(*nf.mode))
+	if mode == "" || mode == "none" {
+		return false, app.FeishuTarget{}, nil
+	}
+	if mode != "feishu" {
+		return false, app.FeishuTarget{}, fmt.Errorf("未知通知方式: %s", mode)
+	}
+	target := app.FeishuTarget{
+		AppID:         strings.TrimSpace(*nf.appID),
+		AppSecret:     strings.TrimSpace(*nf.appSecret),
+		ReceiveID:     strings.TrimSpace(*nf.receiveID),
+		ReceiveIDType: strings.TrimSpace(*nf.receiveIDType),
+	}
+	if target.AppID == "" {
+		target.AppID = cfg.FeishuAppID
+	}
+	if target.ReceiveID == "" {
+		target.ReceiveID = cfg.FeishuReceiveID
+	}
+	if target.ReceiveIDType == "" {
+		target.ReceiveIDType = cfg.FeishuReceiveType
+	}
+	if target.ReceiveIDType == "" {
+		target.ReceiveIDType = "chat_id"
+	}
+	if err := app.ValidateFeishuTarget(target); err != nil {
+		return false, app.FeishuTarget{}, err
+	}
+	return true, target, nil
+}
+
 func runTest(args []string) {
-	fs := flag.NewFlagSet("test", flag.ExitOnError)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := executeTest(ctx, args); err != nil {
+		fmt.Fprintf(os.Stderr, "任务失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func executeTest(ctx context.Context, args []string) error {
+	started := time.Now()
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	colo := fs.String("colo", "", "地区机场码，逗号分隔")
 	ipv6 := fs.Bool("ipv6", false, "使用 IPv6")
 	count := fs.Int("n", 10, "测速数量")
@@ -226,7 +307,15 @@ func runTest(args []string) {
 	maxRun := fs.Int("mt", 0, "整轮测速的时长上限（秒），0 不限")
 	out := fs.String("o", app.ResultFile, "结果输出文件")
 	uf := bindUploadFlags(fs)
-	_ = fs.Parse(args)
+	nf := bindNotificationFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := app.LoadConfig()
+	notifyEnabled, notifyTarget, err := resolveNotification(nf, cfg)
+	if err != nil {
+		return err
+	}
 
 	o := app.Options{
 		Colo: *colo, IPv6: *ipv6, Count: *count,
@@ -237,21 +326,54 @@ func runTest(args []string) {
 		Verbose: true,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	rs, err := app.Run(ctx, o, reportProgress)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "测速失败: %v\n", err)
-		os.Exit(1)
-	}
-	printResults(rs)
-	if err := app.WriteCSV(*out, rs); err != nil {
-		fmt.Fprintf(os.Stderr, "写入 %s 失败: %v\n", *out, err)
+	rs, testErr := runSpeedTest(ctx, o, reportProgress)
+	testStatus, writeStatus := "success", "skipped"
+	var primaryErr error
+	if testErr != nil {
+		testStatus = statusForError(testErr)
+		primaryErr = fmt.Errorf("测速失败: %w", testErr)
+	} else if len(rs) == 0 {
+		testStatus = "failed"
+		primaryErr = errors.New("测速结束但没有有效结果")
 	} else {
-		fmt.Printf("\n结果已保存: %s\n", app.DataPath(*out))
+		printResults(rs)
+		if err := writeCSV(*out, rs); err != nil {
+			writeStatus = "failed"
+			primaryErr = errors.Join(primaryErr, fmt.Errorf("写入 %s 失败: %w", *out, err))
+		} else {
+			writeStatus = "success"
+			fmt.Printf("\n结果已保存: %s\n", app.DataPath(*out))
+		}
 	}
-	doUpload(ctx, uf, rs)
+
+	upload := uploadOutcome{Status: "skipped"}
+	if testErr == nil && len(rs) > 0 {
+		var uploadErr error
+		upload, uploadErr = doUpload(ctx, uf, rs)
+		if uploadErr != nil {
+			primaryErr = errors.Join(primaryErr, uploadErr)
+		}
+	}
+	ended := time.Now()
+	totalStatus := "success"
+	if primaryErr != nil {
+		totalStatus = statusForError(primaryErr)
+	}
+	summary := app.TaskSummary{
+		Operation: "test", Status: totalStatus, StartedAt: started, EndedAt: ended,
+		ResultCount: len(rs), TestStatus: testStatus, WriteStatus: writeStatus, UploadMode: upload.Mode,
+		UploadStatus: upload.Status, UploadCount: upload.Count,
+	}
+	_ = writeStatus // retained as a distinct lifecycle state even though the message contract omits it
+	if primaryErr != nil {
+		summary.Failure = primaryErr.Error()
+	}
+	if notifyEnabled {
+		if notifyErr := finalizeNotification(ctx, cfg, notifyTarget, summary, uploadSecrets(uf)...); notifyErr != nil {
+			primaryErr = errors.Join(primaryErr, notifyErr)
+		}
+	}
+	return primaryErr
 }
 
 // reportProgress 打印测速过程。下载阶段逐条回来，测一个报一个，
@@ -279,11 +401,12 @@ func printResults(rs []app.Result) {
 	}
 }
 
-func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
+func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) (uploadOutcome, error) {
 	mode := strings.ToLower(strings.TrimSpace(*uf.mode))
 	if mode == "" || mode == "none" {
-		return
+		return uploadOutcome{Status: "skipped"}, nil
 	}
+	outcome := uploadOutcome{Mode: mode, Status: "failed"}
 	cfg := app.LoadConfig()
 	switch mode {
 	case "api":
@@ -296,12 +419,14 @@ func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
 		}
 		n, err := app.UploadToAPI(ctx, app.APITarget{Domain: d, UUID: u}, rs, *uf.limit, *uf.clear)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "上报失败: %v\n", err)
-			os.Exit(1)
+			return outcome, fmt.Errorf("上报到 Worker 失败: %w", err)
 		}
 		cfg.WorkerDomain, cfg.UUID = d, u
-		_ = app.SaveConfig(cfg)
+		if err := app.SaveConfig(cfg); err != nil {
+			return outcome, fmt.Errorf("保存 Worker 配置: %w", err)
+		}
 		fmt.Printf("已上报 %d 个 IP 到 Worker\n", n)
+		outcome.Status, outcome.Count = "success", n
 	case "worker":
 		workerURL, workerToken := *uf.workerURL, *uf.workerToken
 		if workerURL == "" {
@@ -312,12 +437,14 @@ func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
 		}
 		n, err := app.UploadToWorker(ctx, app.WorkerTarget{URL: workerURL, Token: workerToken}, rs, *uf.limit)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
-			os.Exit(1)
+			return outcome, fmt.Errorf("上传到优质 IP Worker 失败: %w", err)
 		}
 		cfg.FastIPWorkerURL, cfg.FastIPWorkerToken = workerURL, workerToken
-		_ = app.SaveConfig(cfg)
+		if err := app.SaveConfig(cfg); err != nil {
+			return outcome, fmt.Errorf("保存优质 IP Worker 配置: %w", err)
+		}
 		fmt.Printf("已上传 %d 个 IP 到优质 IP Worker\n", n)
+		outcome.Status, outcome.Count = "success", n
 	case "github":
 		repo, token, path := *uf.repo, *uf.token, *uf.path
 		if repo == "" {
@@ -331,12 +458,14 @@ func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
 		}
 		n, err := app.UploadToGitHub(ctx, app.GitHubTarget{Repo: repo, Token: token, Path: path}, rs, *uf.limit)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
-			os.Exit(1)
+			return outcome, fmt.Errorf("上传到 GitHub 失败: %w", err)
 		}
 		cfg.GitHubRepo, cfg.GitHubToken, cfg.GitHubPath = repo, token, path
-		_ = app.SaveConfig(cfg)
+		if err := app.SaveConfig(cfg); err != nil {
+			return outcome, fmt.Errorf("保存 GitHub 配置: %w", err)
+		}
 		fmt.Printf("已上传 %d 个 IP 到 GitHub\n", n)
+		outcome.Status, outcome.Count = "success", n
 	case "telegram":
 		botToken, chatID := *uf.botToken, *uf.chatID
 		if botToken == "" {
@@ -347,16 +476,48 @@ func doUpload(ctx context.Context, uf uploadFlags, rs []app.Result) {
 		}
 		n, err := app.UploadToTelegram(ctx, app.TelegramTarget{BotToken: botToken, ChatID: chatID}, rs, *uf.limit)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "发送失败: %v\n", err)
-			os.Exit(1)
+			return outcome, fmt.Errorf("发送到 Telegram 失败: %w", err)
 		}
 		cfg.TelegramBotToken, cfg.TelegramChatID = botToken, chatID
-		_ = app.SaveConfig(cfg)
+		if err := app.SaveConfig(cfg); err != nil {
+			return outcome, fmt.Errorf("保存 Telegram 配置: %w", err)
+		}
 		fmt.Printf("已发送 %d 个 IP 到 Telegram\n", n)
+		outcome.Status, outcome.Count = "success", n
 	default:
-		fmt.Fprintf(os.Stderr, "未知上报方式: %s\n", mode)
-		os.Exit(1)
+		return outcome, fmt.Errorf("未知上报方式: %s", mode)
 	}
+	return outcome, nil
+}
+
+func statusForError(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	return "failed"
+}
+
+func uploadSecrets(uf uploadFlags) []string {
+	return []string{*uf.uuid, *uf.token, *uf.workerToken, *uf.botToken}
+}
+
+func finalizeNotification(parent context.Context, cfg *app.Config, target app.FeishuTarget, summary app.TaskSummary, secrets ...string) error {
+	notifyCtx := parent
+	var cancel context.CancelFunc
+	if errors.Is(parent.Err(), context.Canceled) {
+		notifyCtx, cancel = context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+		defer cancel()
+	}
+	if err := notifyFeishu(notifyCtx, target, summary, secrets...); err != nil {
+		return fmt.Errorf("飞书通知失败（主任务状态: %s）: %w", summary.Status, err)
+	}
+	cfg.FeishuAppID = target.AppID
+	cfg.FeishuReceiveID = target.ReceiveID
+	cfg.FeishuReceiveType = target.ReceiveIDType
+	if err := app.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("保存飞书非秘密目标配置: %w", err)
+	}
+	return nil
 }
 
 // ── 优选反代 ──────────────────────────────────────
@@ -410,28 +571,58 @@ func runProxy(args []string) {
 	} else {
 		fmt.Printf("\n结果已保存: %s\n", app.DataPath(app.ResultFile))
 	}
-	doUpload(ctx, uf, rs)
+	if _, err := doUpload(ctx, uf, rs); err != nil {
+		fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // ── 上报已有结果 ──────────────────────────────────
 func runUpload(args []string) {
-	fs := flag.NewFlagSet("upload", flag.ExitOnError)
-	in := fs.String("i", app.ResultFile, "测速结果 CSV")
-	uf := bindUploadFlags(fs)
-	_ = fs.Parse(args)
-
-	if strings.TrimSpace(*uf.mode) == "" {
-		fmt.Fprintln(os.Stderr, "请用 -upload api、worker、github 或 telegram 指定上报方式")
-		os.Exit(1)
-	}
-	rs, err := app.ReadCSV(*in)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "读取失败: %v\n", err)
-		os.Exit(1)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	doUpload(ctx, uf, rs)
+	if err := executeUpload(ctx, args); err != nil {
+		fmt.Fprintf(os.Stderr, "任务失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func executeUpload(ctx context.Context, args []string) error {
+	started := time.Now()
+	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
+	in := fs.String("i", app.ResultFile, "测速结果 CSV")
+	uf := bindUploadFlags(fs)
+	nf := bindNotificationFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := app.LoadConfig()
+	notifyEnabled, notifyTarget, err := resolveNotification(nf, cfg)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(*uf.mode) == "" {
+		return errors.New("请用 -upload api、worker、github 或 telegram 指定上报方式")
+	}
+	rs, err := readCSV(*in)
+	if err != nil {
+		return fmt.Errorf("读取失败: %w", err)
+	}
+	upload, primaryErr := doUpload(ctx, uf, rs)
+	ended := time.Now()
+	summary := app.TaskSummary{Operation: "upload", Status: "success", StartedAt: started, EndedAt: ended,
+		ResultCount: len(rs), UploadMode: upload.Mode, UploadStatus: upload.Status, UploadCount: upload.Count}
+	if primaryErr != nil {
+		summary.Status = statusForError(primaryErr)
+		summary.Failure = primaryErr.Error()
+	}
+	if notifyEnabled {
+		if notifyErr := finalizeNotification(ctx, cfg, notifyTarget, summary, uploadSecrets(uf)...); notifyErr != nil {
+			primaryErr = errors.Join(primaryErr, notifyErr)
+		}
+	}
+	return primaryErr
 }
 
 // ── 定时任务 ──────────────────────────────────────

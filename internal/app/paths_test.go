@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestWritableDir(t *testing.T) {
 		t.Error("应能创建多级目录")
 	}
 
-	if os.Geteuid() == 0 {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("root 无视权限位，跳过只读目录用例")
 	}
 	ro := filepath.Join(t.TempDir(), "ro")

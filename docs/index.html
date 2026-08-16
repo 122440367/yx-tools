@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>yx test 命令生成器</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main><header><p class="eyebrow">yx-tools · GitHub Pages</p><h1>生成一键测速命令</h1><p>勾选或填写参数，复制一行即可执行的 <code>yx test</code> 命令。页面不会联网，也不会保存表单内容。</p></header>
+<form id="command-form" autocomplete="off">
+  <fieldset><legend>程序与命令行</legend><div class="grid">
+    <label>平台<select name="platform"><option value="linux">Linux</option><option value="windows">Windows</option><option value="darwin">macOS</option><option value="freebsd">FreeBSD</option></select></label>
+    <label>架构<select name="arch"><option>amd64</option><option>arm64</option><option value="386">386</option></select></label>
+    <label>Shell<select name="shell"><option value="posix">POSIX（Linux/macOS）</option><option value="powershell">PowerShell</option></select></label>
+    <label>可执行文件路径<input name="executable" placeholder="自动按平台生成"></label>
+  </div></fieldset>
+  <fieldset><legend>基础测速</legend><div class="grid">
+    <label>测速数量 <input name="count" type="number" min="1" value="10"><small data-error-for="count"></small></label>
+    <label>速度下限 MB/s <input name="speed" type="number" min="0" step="0.1" value="1"><small data-error-for="speed"></small></label>
+    <label>延迟上限 ms <input name="delay" type="number" min="1" value="1000"><small data-error-for="delay"></small></label>
+    <label>线程数 <input name="threads" type="number" min="1" value="200"><small data-error-for="threads"></small></label>
+    <label>测速端口 <input name="port" type="number" min="1" value="443"><small data-error-for="port"></small></label>
+    <label>地区机场码<input name="colo" placeholder="例如 HKG,SIN"></label>
+    <label class="wide">测速地址<input name="url" type="url" placeholder="留空使用默认地址"></label>
+    <label class="wide">IP 文件或链接<input name="ipFile"></label>
+  </div><div class="checks"><label><input type="checkbox" name="ipv6"> 使用 IPv6</label><label><input type="checkbox" name="httping">真实 HTTP 延迟</label><label><input type="checkbox" name="noDL">只测延迟</label></div></fieldset>
+  <details><summary>高级测速参数</summary><div class="grid">
+    <label>候选数量 <input name="sample" type="number" min="0" value="0"></label><label>下载超时秒 <input name="dlTimeout" type="number" min="1" value="10"></label><label>整轮上限秒 <input name="maxRun" type="number" min="0" value="0"></label><label>输出文件<input name="output" value="result.csv"></label>
+  </div><div class="checks"><label><input type="checkbox" name="all"> 穷举全部 IP</label></div></details>
+  <fieldset><legend>结果上传（可选）</legend><label>上报方式<select name="upload"><option value="">不上传</option><option value="api">Worker API</option><option value="worker">优质 IP Worker</option><option value="github">GitHub</option><option value="telegram">Telegram</option></select></label><div class="grid" data-conditional="upload">
+    <label>上传数量<input name="uploadLimit" type="number" min="0" value="0"></label><label>目标域名<input name="domain"></label><label>UUID<input name="uuid"></label><label>Worker URL<input name="workerURL"></label><label>Worker Token<input name="workerToken" type="password"></label><label>GitHub 仓库<input name="repo"></label><label>GitHub Token<input name="token" type="password"></label><label>GitHub 路径<input name="path"></label><label>Telegram Bot Token<input name="botToken" type="password"></label><label>Telegram Chat ID<input name="chatID"></label>
+  </div><label class="checks"><input type="checkbox" name="clear"> 上传前清空 Worker</label></fieldset>
+  <fieldset><legend>飞书任务通知（可选）</legend><p class="hint">通知的是成功/失败、耗时和数量等汇总，不会发送 IP 明细。必须显式启用，App Secret 不会保存。</p><label>通知<select name="notify"><option value="">不通知</option><option value="feishu">飞书</option></select></label><div class="grid" data-conditional="notify"><label>App ID<input name="feishuAppID"></label><label>App Secret<input name="feishuAppSecret" type="password"></label><label>接收 ID<input name="feishuReceiveID"></label><label>接收 ID 类型<select name="feishuReceiveIDType"><option value="chat_id">chat_id</option><option value="open_id">open_id</option><option value="union_id">union_id</option><option value="user_id">user_id</option><option value="email">email</option></select></label></div></fieldset>
+</form>
+<section class="result"><div class="result-head"><h2>命令预览</h2><label class="reveal"><input id="reveal-secret" type="checkbox">显示敏感值</label></div><pre id="command-preview" tabindex="0" aria-label="生成的单行命令"></pre><button id="copy-command" type="button">复制真实命令</button><p id="feedback" aria-live="polite"></p><p class="warning">提示：直接把 Secret 放进命令行可能进入 Shell 历史或进程列表；请按需清理记录。剪贴板不可用时，显示敏感值后手动复制。</p></section>
+</main><script type="module" src="app.mjs"></script>
+</body></html>
