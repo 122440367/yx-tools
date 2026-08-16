@@ -20,6 +20,7 @@ export function init(root = document) {
     preview.classList.toggle('invalid', !generated.valid);
     root.querySelectorAll('[data-error-for]').forEach((el) => { el.textContent = generated.errors[el.dataset.errorFor] ?? ''; });
     root.querySelectorAll('[data-conditional]').forEach((el) => { el.hidden = !state[el.dataset.conditional]; });
+    root.querySelectorAll('[data-upload-mode]').forEach((el) => { el.hidden = el.dataset.uploadMode !== (state.upload || ''); });
   };
   form.addEventListener('input', update); form.addEventListener('change', update);
   reveal.addEventListener('change', update);
