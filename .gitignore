@@ -14,3 +14,8 @@ data/
 
 # 系统
 .DS_Store
+
+# 本地 AI / 规格规划工具
+.agents/
+.codex/
+openspec/
