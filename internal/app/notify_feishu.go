@@ -176,8 +176,8 @@ func formatDuration(d time.Duration) string {
 		return "不足1秒"
 	}
 	h := int(d / time.Hour)
-	m := int(d%time.Hour) / int(time.Minute)
-	s := int(d%time.Minute) / int(time.Second)
+	m := int((d % time.Hour) / time.Minute)
+	s := int((d % time.Minute) / time.Second)
 	var parts []string
 	if h > 0 {
 		parts = append(parts, fmt.Sprintf("%d小时", h))
