@@ -63,7 +63,12 @@ func TestFormatTaskSummaryIsAggregateAndRedacted(t *testing.T) {
 		ResultCount: 4, TestStatus: "success", UploadMode: "github", UploadStatus: "failed", UploadCount: 2,
 		Failure: long,
 	}, secret)
-	for _, want := range []string{"开始时间: 2026-08-16 10:00:00 CST", "结束时间: 2026-08-16 10:02:13 CST", "耗时: 2分13秒", "测速结果: 4 条", "上传: github（失败，2 条）", "[REDACTED]"} {
+	localStart := start.In(time.Local)
+	for _, want := range []string{
+		"开始时间: " + localStart.Format("2006-01-02 15:04:05 MST"),
+		"结束时间: " + localStart.Add(2*time.Minute+13*time.Second).Format("2006-01-02 15:04:05 MST"),
+		"耗时: 2分13秒", "测速结果: 4 条", "上传: github（失败，2 条）", "[REDACTED]",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
