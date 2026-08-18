@@ -14,8 +14,8 @@ func TestFormatGitHubContentIncludesSequenceNumber(t *testing.T) {
 	}
 	got := formatGitHubContent(rs, infos)
 	want := "1.1.1.1#1 | AU | CF | 8.34MB/s\n" +
-		"202.100.1.1#2 | XX | 未知 | 5.00MB/s\n" +
-		"2001:db8::1#3 | CN | CM | 3.50MB/s"
+		"202.100.1.1:8443#2 | XX | 未知 | 5.00MB/s\n" +
+		"[2001:db8::1]:2053#3 | CN | CM | 3.50MB/s"
 	if got != want {
 		t.Fatalf("want:\n%s\n\ngot:\n%s", want, got)
 	}

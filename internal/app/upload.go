@@ -381,10 +381,21 @@ func formatGitHubContent(rs []Result, infos map[string]ipInfo) string {
 			country = "XX"
 		}
 		provider := providerName(ip, info)
+		uploadIP := formatUploadIP(ip, r.Port)
 		fmt.Fprintf(&sb, "%s#%d | %s | %s | %sMB/s\n",
-			ip, i+1, country, provider, formatSpeed(r.Speed))
+			uploadIP, i+1, country, provider, formatSpeed(r.Speed))
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+// formatUploadIP 保持 443 的兼容格式，非 443 端口写入 endpoint。
+// IPv6 使用方括号，避免与端口分隔符混淆。
+func formatUploadIP(ip string, port int) string {
+	ip = strings.TrimSpace(ip)
+	if port <= 0 || port == 443 {
+		return ip
+	}
+	return net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
 func formatSpeed(speed float64) string {
