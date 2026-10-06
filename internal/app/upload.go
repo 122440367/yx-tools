@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,76 @@ import (
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// uploadMaxRetries bounds how many times a failed upload is retried after the
+// first attempt. Only transient failures (transport errors such as timeouts,
+// and HTTP 429/5xx responses) are retried; deterministic 4xx errors are not.
+const uploadMaxRetries = 3
+
+// uploadRetryDelays is the backoff before the 1st, 2nd and 3rd retry.
+var uploadRetryDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+// uploadSleep is injectable so tests do not have to wait out the real backoff.
+var uploadSleep = sleepContext
+
+// retryableUploadError marks an upload failure that should be retried.
+type retryableUploadError struct {
+	err        error
+	retryAfter time.Duration
+}
+
+func (e *retryableUploadError) Error() string { return e.err.Error() }
+func (e *retryableUploadError) Unwrap() error { return e.err }
+
+// uploadHTTPError turns a non-2xx upload response into an error. HTTP 429 and
+// 5xx are marked retryable; everything else is returned as a plain error.
+func uploadHTTPError(label string, resp *http.Response, body string) error {
+	err := fmt.Errorf("%s HTTP %d: %s", label, resp.StatusCode, truncate(body, 200))
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return &retryableUploadError{err: err, retryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
+	return err
+}
+
+// isRetryableUploadError reports whether an upload failure is worth retrying.
+// Caller cancellation is handled by withUploadRetry via ctx.Err(), not here,
+// because a client-side request timeout also wraps context.DeadlineExceeded.
+func isRetryableUploadError(err error) bool {
+	var retryErr *retryableUploadError
+	if errors.As(err, &retryErr) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF)
+}
+
+// withUploadRetry runs send and retries transient failures up to
+// uploadMaxRetries times (so at most uploadMaxRetries+1 total attempts). send
+// must be safe to call more than once. Cancelling ctx stops retrying at once.
+func withUploadRetry(ctx context.Context, send func() (int, error)) (int, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		n, err := send()
+		if err == nil {
+			return n, nil
+		}
+		lastErr = err
+		if attempt >= uploadMaxRetries || !isRetryableUploadError(err) || ctx.Err() != nil {
+			return n, lastErr
+		}
+		delay := uploadRetryDelays[min(attempt, len(uploadRetryDelays)-1)]
+		var retryErr *retryableUploadError
+		if errors.As(err, &retryErr) && retryErr.retryAfter > 0 {
+			delay = retryErr.retryAfter
+		}
+		if sleepErr := uploadSleep(ctx, delay); sleepErr != nil {
+			return n, lastErr
+		}
+	}
+}
 
 // APITarget 描述 cfnew 的优选 IP 接口位置
 type APITarget struct {
@@ -199,22 +270,24 @@ func UploadToWorker(ctx context.Context, t WorkerTarget, rs []Result, limit int)
 	if err != nil {
 		return 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return 0, fmt.Errorf("Worker 上传失败 HTTP %d: %s", resp.StatusCode, truncate(string(body), 200))
-	}
-	return len(rs), nil
+	return withUploadRetry(ctx, func() (int, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return 0, uploadHTTPError("Worker 上传失败", resp, string(body))
+		}
+		return len(rs), nil
+	})
 }
 
 // TelegramTarget describes a Telegram Bot destination.
